@@ -1,0 +1,6 @@
+pandas==1.3.4
+numpy==1.22.2
+urllib3==1.26.7
+boto3==1.21.12
+awswrangler==2.14.0
+PyYAML==6.0
