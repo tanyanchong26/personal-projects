@@ -1,0 +1,914 @@
+---
+title: "MI.com Call Planning Analysis"
+author: "Yan Chong"
+output: 
+  revealjs::revealjs_presentation:
+    theme: moon
+---
+
+## Deck Outline
+
+<style>
+.container{
+    display: flex;
+}
+.col{
+    flex: 1;
+}
+.reveal section pre code {
+    font-size: 0.5em;
+}
+.reveal section p {
+    font-size: 0.7em;
+}.container ul{
+    font-size: 0.75em;
+}
+</style>
+
+* Introduction to the Problem
+* Exploratory Data Analysis
+  + Time Series Plot 
+  + Correlation
+  + Explanatory Modeling for Measurement of Effect of Variables (Poisson Regression)
+  + Outliers & Goodness-of-Fit
+* Predictive Modeling
+* Prescriptive Analytics 
+  + First Intuition
+  + Further Possible Analysis
+* Conclusion
+* Appendix for the Geeks
+
+## Introduction to the Problem
+
+* MI.com is a website for accommodation booking, based in UK, offering low-priced accommodations.
+* It now has about 500k bookings a day. 
+* Customers call MI.com to query about their hotel and apartments.
+* The purpose of the deck is to present the model that is best able to 
+  + represent the effects of the different variables
+  + arrive at a predictive model to predict calls
+  + think about prescriptive modeling for headcount planning
+
+## Exploratory Data Analysis
+
+```{r echo = FALSE, results = "hide", warning=FALSE, message=FALSE}
+setwd("C:/Users/tanya/OneDrive/Desktop")
+
+library(tidyverse)
+library(lubridate)
+library(caret)
+
+data_calls <- read_delim("case_data_calls.csv",delim=";") %>%
+  mutate_at(vars(date),~as.Date(., format = "%d-%m-%Y"))
+
+data_resv <- read_delim("case_data_reservations.csv",delim = ";") %>%
+  mutate_at(vars(date),~as.Date(., format = "%d-%m-%Y"))
+
+combined_data <- data_calls %>%
+  inner_join(data_resv,by=c("date"))
+
+combined_corr <- combined_data %>%
+  mutate(PreviousCalls = lag(calls,n=1,order_by = date),
+         PreviousTotalReservations = lag(total_reservations,n=1,order_by = date)) 
+```
+
+<div class="container">
+
+<div class="col">
+
+```{r echo = FALSE}
+data_calls %>%
+  mutate(months = month(date, label = TRUE)) %>%
+  mutate_at(vars(months),~as.factor(.)) %>%
+  ggplot(aes(x=date,y=calls,colour = months, group = 1)) +
+  geom_line() +
+  scale_x_date(date_breaks = "3 months") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(
+    x = "Date",
+    y = "Number of Calls",
+    title = "Number of Calls against Time",
+    colour = "Month Period"
+  )
+```
+
+Yearly seasonal effect is present. The number of calls peaks in Aug while the trough happens in Feb period. 
+
+</div>
+
+<div class="col">
+
+```{r echo = FALSE}
+data_calls %>%
+  mutate(weekday = wday(date,label = TRUE)) %>%
+  mutate_at(vars(weekday),~factor(.,levels = c("Mon","Tue","Wed",
+                                               "Thu","Fri","Sat",
+                                               "Sun"))) %>%
+  ggplot(aes(x=weekday,y=calls,colour=weekday)) +
+  stat_summary(fun.data = "mean_cl_boot",
+               fun.args = list(
+                 conf.int = 0.95
+               )) +
+  theme_minimal() +
+  xlab ("Day") +
+  ylab("Calls") +
+  labs(
+    caption = "Range based on 95% Confidence Interval",
+    colour = "Day",
+    title = "Parametric Method of Estimating Mean of Number of Calls"
+  ) +
+  ggsci::scale_color_d3() +
+  scale_y_continuous(breaks = seq(2000,8000,by=1000),labels = scales::number) 
+```
+
+It can also be seen that weekends have substantially less calls compared to weekdays. And the number of calls across the 5 weekdays are generally consistent within the 95 % confidence interval.
+
+</div>
+
+</div>
+
+## Exploratory Data Analysis
+
+
+<div class="container">
+
+<div class="col">
+
+```{r echo = FALSE, warning=FALSE}
+ggplot(data=NULL,aes(x=combined_corr$PreviousCalls,y=combined_corr$PreviousTotalReservations)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(formula = y~x, method="lm", linetype = 2, colour = "tomato3") +
+  labs(
+    x = expression(Delta*" Calls (First Order Difference)"),
+    y = expression(Delta*" Total Reservations (First Order Difference)"),
+    title = "Correlation between First Order Difference of Calls against Total Reservations"
+  ) +
+  scale_x_continuous(labels=scales::number) +
+  scale_y_continuous(labels=scales::number) +
+  ggpmisc::stat_poly_eq(formula = y~x,
+                        aes(label = ..rr.label..),
+                        parse = TRUE)
+```
+
+Visually, the correlation between them is very strong, after the removal of the spurious relationship between them on time.
+
+</div>
+
+<div class="col" data-markdown>
+
+```{r echo = FALSE, warning = FALSE}
+ cor.test(combined_corr$PreviousCalls,combined_corr$PreviousTotalReservations)
+```
+
+The statistical method further affirms the strong positive linear relationship between `total_reservations` and `calls`.
+
+</div>
+
+</div>
+
+## Explanatory Model using Poisson Regression
+
+<div class="container">
+
+<div class="col">
+
+```{r echo = FALSE, warning=FALSE}
+combined_data_model <- combined_data %>%
+  mutate_at(vars(weekday),~factor(.,
+                                  levels = c(1,2,3,4,5,6,7),
+                                  labels = c("Mon","Tues","Wed",
+                                             "Thurs","Fri","Sat",
+                                             "Sun"))) %>%
+  select(-date)
+
+model_poisson <- glm(calls~., data = combined_data_model,
+                     family = "poisson")
+
+summary(model_poisson)
+```
+
+Poisson Regression is best used to model rate, in this case, rate of calls per day.
+
+</div>
+
+<div class="col">
+
+
+* Almost all variables are statistically significant at 95% significance level but statistical inflation unlikely.
+* Taking all other predictors into account, Monday is the busiest period.
+  + Tues ($\Downarrow$ 0.008%), Fri ($\Downarrow$ 1% ), Sat ($\Downarrow$ 5%) and Sun ($\Downarrow$ 14%) relative to Monday. 
+* Every 1000 increase in the reservation 2 months in advance?  0.4 % $\Uparrow$ in calls!
+* Every 1000 increase in the total reservations? 2.9% $\Uparrow$ in calls! 
+* Summer break? $\Downarrow$ 4.2% in calls! 
+* Christmas Break? $\Uparrow$ 1.4% in calls.
+* A Special Day? $\Downarrow$ 13.7% in calls!
+
+
+</div>
+
+</div>
+
+## Model Fitting and Outliers
+
+<div class="container">
+
+<div class="col">
+
+* Goodness-of-fit is not achieved (The results are in appendix). 
+* Presence of outliers (strictly speaking, influential points) affecting modeling
+* Higher than usual calls in the first half of August of 2015
+* It was tripled of the previous year for 3rd Aug 2015
+* Pattern observed every other 7 days for 3 weeks
+* Promotions? Events? Needed to be accounted for to improve model explanatory power.
+
+</div>
+
+<div class="col">
+
+```{r echo = FALSE, warning=FALSE}
+combined_data %>%
+  mutate(month = month(date),
+         day = day(date),
+         year = year(date)) %>%
+  filter(month ==8 & day %in% seq(3,18,1)) %>%
+  mutate_at(vars(year),~as.factor(.)) %>%
+  ggplot(aes(x=year,y=calls,fill=year)) +
+  geom_col() +
+  facet_wrap(~day) +
+  theme_minimal() +
+  geom_text(aes(label = scales::number(calls,accuracy = 1)), vjust = -0.25) +
+  ggsci::scale_fill_d3() +
+  scale_y_continuous(expand = expansion(0,3000)) +
+  labs(
+    fill = "Year",
+    y = "Calls",
+    x = "Year"
+  )
+```
+
+</div>
+
+</div>
+
+## Predictive Modeling
+
+<div class="container">
+
+<div class="col">
+
+* Will be based on Machine Learning.
+* Considered models
+  + Linear Regression
+  + Poisson Regression
+  + Random Forest Regression
+  + Support Vector Regression
+  + kth Nearest Neighbour Regression
+* Repeated 10-fold Cross Validation
+* Assessed based on Minimum Root Mean Squared Error
+* Linear Regression, the simplest model, turns out to be the best!
+* Results can be found in appendix.
+* Good thing about simple models - It is possible to see which variable has the    greatest importance in prediction!
+
+</div>
+
+<div class="col">
+
+```{r echo = FALSE, warning=FALSE}
+combined_data_model_scaled <- combined_data_model %>%
+  fastDummies::dummy_cols(select_columns = "weekday", remove_first_dummy = TRUE) %>%
+  select(-weekday) %>%
+  scale(.) %>%
+  as.data.frame(.)
+
+chosen_model <- lm(calls~., data = combined_data_model_scaled )
+
+enframe(coef(chosen_model)) %>%
+  arrange(desc(value)) %>%
+  filter(name != "(Intercept)") %>%
+  ggplot(aes(x=reorder(name,value),y=value)) +
+  geom_col() +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 5)) +
+  theme_minimal() +
+  coord_flip() +
+  labs(
+    y = "Scaled Coefficient",
+    x = "Coefficient",
+    title = "Scaled Coefficients of Linear Regression"
+  )
+```
+
+It can be observed that total_reservations is way a stronger predictor of calls than any other predictors.
+
+</div>
+
+</div>
+
+## First Intuition on Headcount Planning
+
+* The arrival rate, $\lambda$, can now be obtained from the predicted model.
+* Let's make the following assumptions:
+  + It is possible to model number of customers serviced per day per employee (data not provided here)
+  + Expected arrival Rate is uniform throughout the day (reasonable given MI.com is global)
+  + Infinite Customer Population (reasonable)
+  + Queue Length is unlimited
+  + First Come First Serve
+
+## M/M/1 Model
+
+* M/M/1 model can be used. Let's say the customer should not wait more than a certain period of time in the queue.
+
+$$W_{s} = \frac{\lambda}{\mu(\mu - \lambda)}$$
+where $W_{s}$ is time spent of a customer in the queue, $\lambda$ is call arrival rate, $\mu$ is call service rate. If servicing capabilities is additive (i.e. 2 employees double the service rate of a single employee),
+
+$$W_{s}(n\mu)^{2}-W_{s}\lambda(n\mu)-\lambda = 0$$
+
+It becomes a quadratic equation!!!! Then we will just solve for n!
+
+* However, this is useful as a ballpark figure.
+  + Service data should be collected.
+  + Optimization and Simulation should be performed to derive the recommended headcount.
+
+## Conclusion
+
+* Calls peak in Aug, Trough in Feb
+* Weekends less call than weekdays
+* High correlation between Calls and Total Reservations
+* Day of the week, reservations, advanced reservations, summer break, christmas break and special day have explanatory power on number of calls
+* Outliers Detected for First Half of Aug 2015
+* Total Reservations the single most powerful predictor on call rates
+* Using M/M/1 model to guess number of head count
+* More data required to model service rate
+
+# Thank You Very Much!!! 
+
+## Appendix 1 - Goodness of Fit of Poisson Regression
+
+<div class="container">
+
+<div class="col">
+
+```{r}
+qchisq(0.95,11)
+
+model_poisson$null.deviance - model_poisson$deviance
+```
+
+
+Test of $\chi_{squared}$ suggested rejection of null hypothesis of no explanatory power, since it lies within the rejection zone
+
+</div>
+
+<div class="col">
+
+```{r warning=FALSE}
+qchisq(0.95,nrow(combined_data_model) - length(coef(model_poisson)))
+
+model_poisson$deviance
+```
+
+Goodness of Fit, however, is not established using $\chi_{squared}$. The null hypothesis of good fit is thus rejected since it lies within the rejection zone.
+
+</div>
+
+</div>
+
+## Appendix 1 - Goodness of Fit of Poisson Regression
+
+<div class="container">
+
+<div class="col">
+
+```{r echo = FALSE}
+ggplot(data=NULL, aes(sample = residuals(model_poisson,type = "deviance"))) +
+  stat_qq() +
+  stat_qq_line() +
+  theme_minimal() +
+  labs(
+    title = "Quantile-Quantile Plot of Deviance Residuals of Poisson Regression",
+    subtitle = "Normal Distribution Not Achived Based on Deviances"
+  )
+
+```
+
+
+Normality does not seem to be lacking for the most part except the lower tail of the deviance. 
+
+</div>
+
+<div class="col">
+
+```{r echo = FALSE, warning=FALSE}
+ggplot(data=NULL, aes(x = residuals(model_poisson,type = "deviance"))) +
+  geom_histogram(bins = 30) +
+  theme_minimal() +
+  labs(
+    x = "Residuals",
+    y = "Occurences",
+    title = "Histogram of Deviances",
+    subtitle = "Normality not observed"
+  )
+```
+
+The histogram affirms what has been seen on quantile-quantile plot. Having data points so far to the left suggests presence of extreme outliers.
+
+</div>
+
+</div>
+
+## Appendix 2 - Outliers
+
+<div class="container">
+
+<div class="col">
+
+```{r}
+car::vif(model_poisson)
+```
+
+Multi-collinearity does not seem to be an issue.
+
+</div>
+
+<div class="col">
+
+```{r echo = FALSE, warning=FALSE}
+tibble(cooks_distance = cooks.distance(model_poisson)) %>%
+  rownames_to_column(var="rowIndex") %>%
+  ggplot(aes(x=factor(rowIndex),y=cooks_distance)) +
+  geom_col() +
+  scale_x_discrete(breaks = seq(0,nrow(combined_data_model),100)) +
+  labs(
+    x = "Index",
+    y = "Cook's Distance",
+    title = "Outlier Detection Plot for Poisson Regression",
+    subtitle = "Leverage Points Spotted Around Aug 2015"
+  ) +
+  geom_hline(aes(yintercept = 1), linetype = 2, colour = "tomato3") +
+  theme_minimal()
+```
+
+Extreme Cook's Distance spotted between row index 580 and 600, corresponding to the Aug 2015 period.
+
+</div>
+
+</div>
+
+## Appendix 3: Machine Learning Code
+
+```{r message = FALSE, warning=FALSE, results="hide"}
+# Setting the Seed
+
+library(caret)
+
+set.seed(13112020)
+
+# Training + Validation Set
+
+test_set <- combined_data_model %>%
+  sample_frac(0.1)
+
+# Test Set
+
+train_set <- combined_data_model %>%
+  anti_join(test_set)
+
+# Set Control for Linear Regression & Poisson Regression
+
+tc <- trainControl("repeatedcv",
+                   number = 10,
+                   repeats = 3,
+                   savePredictions = TRUE)
+
+# Poisson Regression
+
+poisson_model_pred <- train(
+  calls ~.,
+  data = train_set,
+  method = "glm",
+  trControl = tc,
+  family = poisson
+)
+
+# Linear Regression
+
+linear_regression_model_pred <- train(
+  calls ~.,
+  data = train_set,
+  method = "lm",
+  trControl = tc
+)
+
+# Set Control for Regression with Variables (Set for Random Search)
+
+control_rf <- trainControl(method = "repeatedcv",
+                        number = 10,
+                        repeats = 3,
+                        search = "random",
+                        savePredictions = TRUE)
+
+# Random Forest
+
+random_forest <- train(
+  calls ~.,
+  data = train_set,
+  method = "rf",
+  trControl = control_rf
+)
+
+# Support Vector Regression
+
+## Scale dataset
+
+train_set_dummies_scale <- fastDummies::dummy_cols(train_set,select_columns = c("weekday"),
+                                                   remove_first_dummy = TRUE) %>%
+  select(-weekday) %>%
+  scale(.)
+
+svr <- train(
+  calls ~.,
+  data = train_set_dummies_scale,
+  method = "svmLinear",
+  trControl = control_rf
+)
+
+# k-th Nearest Regression
+
+knn <- train(
+  calls ~.,
+  data = train_set,
+  method = "knn",
+  trControl = control_rf
+)
+
+rmse_poisson <- tibble(method = "Poisson Regression",poisson_model_pred$results["RMSE"])
+rmse_lm <- tibble(method = "Linear Regression",linear_regression_model_pred$results["RMSE"])
+rf_results <- random_forest$results
+rmse_rf <- tibble(method = "Ramdom Forest",RMSE = rf_results[which.min(rf_results$RMSE),"RMSE"])
+svr_results <- svr$results
+rmse_svr <- tibble(method = "Support Vector Regression", 
+                   RMSE = svr_results[which.min(svr_results$RMSE),"RMSE"] * sd(train_set$calls))
+knn_results <- knn$results
+rmse_knn <- tibble(method = "kth Nearest Neighbour Regression",
+                   RMSE = knn_results[which.min(knn_results$RMSE),"RMSE"])
+
+```
+
+## Appendix 4: Machine Learning Model Selection
+
+<div class="container">
+
+<div class="col">
+
+```{r echo = FALSE}
+rmse_poisson %>%
+  bind_rows(rmse_lm,rmse_rf,rmse_svr,rmse_knn) %>%
+  ggplot(aes(x=reorder(method,RMSE),y=RMSE,fill = method)) +
+  geom_col() +
+  coord_flip() +
+  ggsci::scale_fill_d3() +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  ) +
+  labs(
+    x = "Method",
+    fill = "Method",
+    title = "Prediction Models with RMSE"
+  ) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10))
+```
+
+Comparison of Different Machine Learning Models Based on RMSE
+
+</div>
+
+<div class="col">
+
+```{r warning=FALSE, message = FALSE}
+test_set %>%
+  mutate(predicted_values = predict(linear_regression_model_pred, 
+                                    newdata = test_set)) %>%
+  mutate(sqerror = (calls-predicted_values)^2) %>%
+  summarise(RMSE = sqrt(sum(sqerror)/n()))
+```
+
+Final Check with Test Set. So far the test set result is very satisfactory.
+
+</div>
+
+</div>
+
+## Appendix 5: Code Snippets
+
+```{r eval = FALSE}
+
+setwd("C:/Users/tanya/OneDrive/Desktop")
+
+library(tidyverse)
+library(lubridate)
+library(caret)
+
+### Loading and Preparing the Data
+
+data_calls <- read_delim("case_data_calls.csv",delim=";") %>%
+  mutate_at(vars(date),~as.Date(., format = "%d-%m-%Y"))
+
+data_resv <- read_delim("case_data_reservations.csv",delim = ";") %>%
+  mutate_at(vars(date),~as.Date(., format = "%d-%m-%Y"))
+
+combined_data <- data_calls %>%
+  inner_join(data_resv,by=c("date"))
+
+### Plot of Calls against Date
+
+data_calls %>%
+  ggplot(aes(x=date,y=calls)) +
+  geom_line() +
+  scale_x_date(date_breaks = "1 month") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90),
+        panel.grid.minor.x = element_blank()) +
+  scale_y_continuous(labels = scales::number) +
+  labs(
+    x = "Date",
+    y= "Calls",
+    title = "Chart of Calls against Date",
+    subtitle = "Yearly Cycles of Peak in Aug, Trough in Feb"
+  )
+
+### Parametric Method
+
+param <- combined_data_model %>%
+  ggplot(aes(x=weekday,y=calls,fill=weekday)) +
+  geom_boxplot(notch = TRUE) +
+  ggsci::scale_fill_d3() +
+  theme_classic() +
+  xlab ("Day") +
+  ylab("Calls") +
+  scale_y_continuous(labels = scales::number) +
+  labs(
+    fill = "Day"
+  ) +
+  labs(
+    title = "Non-Parametric Method of Estimating Median of Calls",
+    subtitle = "Number of Calls Lower on Sat and Sun"
+  )
+
+### Non-Parametric Method
+
+non_param <- combined_data_model %>%
+  ggplot(aes(x=weekday,y=calls,colour=weekday)) +
+  stat_summary(fun.data = "mean_cl_boot",
+               fun.args = list(
+                 conf.int = 0.95
+               )) +
+  theme_classic() +
+  xlab ("Day") +
+  ylab("Calls") +
+  labs(
+    caption = "Range based on 95% Confidence Interval",
+    colour = "Day",
+    title = "Parametric Method of Estimating Mean of Number of Calls",
+    subtitle = "Number of Calls Lower on Sat and Sun"
+  ) +
+  ggsci::scale_color_d3() +
+  scale_y_continuous(breaks = seq(2000,8000,by=1000),labels = scales::number) 
+
+ggpubr::ggarrange(param,non_param, nrow = 2)
+
+### Plot of Reservations against Date
+
+data_resv %>%
+  ggplot(aes(x=date,y=total_reservations)) +
+  geom_line() +
+  scale_x_date(date_breaks = "6 month") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_y_continuous(labels = scales::number) +
+  labs(
+    x = "Date",
+    y= "Total Reservations",
+    title = "Chart of Total Reservations against Date",
+    subtitle = "Seasonal Effect coupled with cyclical effect"
+  )
+
+### Merging 2 Plots
+
+combined_data %>%
+  mutate_at(vars(total_reservations),~./2.5) %>%
+  ggplot() +
+  geom_line(aes(x=date,y=calls), colour = "tomato3") +
+  geom_line(aes(x=date,y=total_reservations), colour = "deepskyblue4") +
+  scale_y_continuous(
+    name = "Calls",
+    sec.axis = sec_axis(trans=~./2.5, name = "Total Reservations",
+                        labels = scales::number),
+    labels = scales::number
+  ) +
+  theme_classic() +
+  labs(
+    x = "Date",
+    title = "Plotting both Calls and Reservations against Date"
+  ) +
+  scale_x_date(date_breaks = "6 month")
+
+## Correlation
+
+combined_corr <- combined_data %>%
+  mutate(PreviousCalls = lag(calls,n=1,order_by = date),
+         PreviousTotalReservations = lag(total_reservations,n=1,
+                                         order_by = date)) 
+
+### Correlation Test
+
+cor.test(combined_corr$PreviousCalls,combined_corr$PreviousTotalReservations)
+
+### Correlation Plot
+
+ggplot(data=NULL,aes(x=combined_corr$PreviousCalls,y=combined_corr$PreviousTotalReservations)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(formula = y~x, method="lm", linetype = 2, colour = "tomato3") +
+  labs(
+    x = expression(Delta*" Calls (First Order Difference)"),
+    y = expression(Delta*" Total Reservations (First Order Difference)"),
+    title = "Correlation between First Order Difference of Calls against Total Reservations",
+    subtitle = "Close Correlation Observed"
+  ) +
+  scale_x_continuous(labels=scales::number) +
+  scale_y_continuous(labels=scales::number) +
+  ggpmisc::stat_poly_eq(formula = y~x,
+                        aes(label = ..rr.label..),
+                        parse = TRUE) 
+
+# Poisson Regression (Exploratory)
+
+combined_data_model <- combined_data %>%
+  mutate_at(vars(weekday),~factor(.,
+                                  levels = c(1,2,3,4,5,6,7),
+                                  labels = c("Mon","Tues","Wed",
+                                             "Thurs","Fri","Sat",
+                                             "Sun"))) %>%
+  select(-date)
+
+model_poisson <- glm(calls~., data = combined_data_model,
+                     family = "poisson")
+
+summary(model_poisson)
+
+## Test for Total Regressopm
+
+qchisq(0.95,11)
+
+model_poisson$null.deviance - model_poisson$deviance
+
+## GOF Test
+
+qchisq(0.95,nrow(combined_data_model) - length(coef(model_poisson)))
+
+model_poisson$deviance
+
+## Outlier Detection
+
+### Chart
+
+tibble(cooks_distance = cooks.distance(model_poisson)) %>%
+  rownames_to_column(var="rowIndex") %>%
+  ggplot(aes(x=factor(rowIndex),y=cooks_distance)) +
+  geom_col() +
+  scale_x_discrete(breaks = seq(0,nrow(combined_data_model),100)) +
+  labs(
+    x = "Index",
+    y = "Cook's Distance",
+    title = "Outlier Detection Plot for Poisson Regression",
+    subtitle = "Leverage Points Spotted Around Aug 2015"
+  ) +
+  geom_hline(aes(yintercept = 1), linetype = 2, colour = "tomato3") +
+  theme_minimal()
+
+### Tibble
+
+tibble(cooks_distance = cooks.distance(model_poisson)) %>%
+  bind_cols(combined_data) %>%
+  rownames_to_column(var="rowIndex") %>%
+  mutate_at(vars(rowIndex),~as.integer(.)) %>%
+  filter(rowIndex>=580 & rowIndex<=595)
+
+### Outlier Plot
+
+combined_data %>%
+  mutate(month = month(date),
+         day = day(date),
+         year = year(date)) %>%
+  filter(month ==8 & day %in% seq(3,18,1)) %>%
+  mutate_at(vars(year),~as.factor(.)) %>%
+  ggplot(aes(x=year,y=calls,fill=year)) +
+  geom_col() +
+  facet_wrap(~day) +
+  theme_minimal() +
+  geom_text(aes(label = scales::number(calls,accuracy = 1)), vjust = -0.25) +
+  ggsci::scale_fill_d3() +
+  scale_y_continuous(expand = expansion(0,3000)) +
+  labs(
+    fill = "Year",
+    y = "Calls",
+    x = "Year"
+  )
+
+### Base R Approach
+
+plot(model_poisson)
+
+## Goodness of Fit
+
+ggplot(data=NULL, aes(sample = residuals(model_poisson,type = "deviance"))) +
+  stat_qq() +
+  stat_qq_line() +
+  theme_classic() +
+  labs(
+    title = "Quantile-Quantile Plot of Deviance Residuals of Poisson Regression",
+    subtitle = "Normal Distribution Not Achived Based on Deviances"
+  )
+
+ggplot(data=NULL, aes(x = residuals(model_poisson,type = "deviance"))) +
+  geom_histogram() +
+  theme_classic() +
+  labs(
+    x = "Residuals",
+    y = "Occurences",
+    title = "Histogram of Deviances",
+    subtitle = "Normality not observed"
+  )
+
+## Variance Inflation Factor
+
+car::vif(model_poisson)
+
+# Machine Learning
+
+### See Previous Snippet
+
+## Model Comparison
+
+rmse_poisson %>%
+  bind_rows(rmse_lm,rmse_rf,rmse_svr,rmse_knn) %>%
+  ggplot(aes(x=reorder(method,RMSE),y=RMSE,fill = method)) +
+  geom_col() +
+  coord_flip() +
+  ggsci::scale_fill_d3() +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  ) +
+  labs(
+    x = "Method",
+    fill = "Method",
+    title = "Prediction Models with RMSE"
+  ) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10))
+
+
+## Linear Regression is the best fit
+
+model_pred <- test_set %>%
+  mutate(predicted_values = predict(linear_regression_model_pred, 
+                                    newdata = test_set)) %>%
+  mutate(sqerror = (calls-predicted_values)^2) %>%
+  summarise(RMSE = sqrt(sum(sqerror)/n()))
+
+## Fit to Whole Model
+
+combined_data_model_scaled <- combined_data_model %>%
+  fastDummies::dummy_cols(select_columns = "weekday", 
+                          remove_first_dummy = TRUE) %>%
+  select(-weekday) %>%
+  scale(.) %>%
+  as.data.frame(.)
+
+chosen_model <- lm(calls~., data = combined_data_model_scaled )
+
+# Top Coefficients of Linear Modeling
+
+enframe(coef(chosen_model)) %>%
+  arrange(desc(value)) %>%
+  filter(name != "(Intercept)") %>%
+  ggplot(aes(x=reorder(name,value),y=value)) +
+  geom_col() +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 5)) +
+  theme_minimal() +
+  coord_flip() +
+  labs(
+    y = "Scaled Coefficient",
+    x = "Coefficient",
+    title = "Scaled Coefficients of Linear Regression"
+  )
+
+# Curious - Check Linear Model Goodness-of-Fit
+
+ggplot(data=NULL,aes(sample = MASS::stdres(chosen_model))) +
+  stat_qq() +
+  stat_qq_line()
+
+```
+
