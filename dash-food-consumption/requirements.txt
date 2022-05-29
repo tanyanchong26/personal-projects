@@ -1,0 +1,13 @@
+jupyter
+matplotlib==3.3.4
+seaborn==0.11.1
+pandas==1.4.2
+numpy==1.22.4
+dash >=0.6.0
+statsmodels==0.13.2
+gunicorn==20.1.0
+plotly==5.8.0
+networkx==2.8.2
+xlrd == 2.0.1
+openpyxl == 3.0.10
+kaleido==0.2.1
