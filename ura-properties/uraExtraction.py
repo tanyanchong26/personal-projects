@@ -1,12 +1,16 @@
-import json
 import pandas as pd
 from onemapsg import OneMapClient
 import awswrangler as wr
 import boto3
 import datetime as dt
-import urllib.request
+import requests
 import yaml
 import time
+import snowflake.connector
+import snowflake.connector.pandas_tools
+import os
+
+os.chdir("/home/tanyanchong/OneDrive/Documents/Git/personal-projects/ura-properties")
 
 #%% Authentication
 
@@ -19,11 +23,10 @@ accessKey = cred["ura_credentials"]["accessKey"]
 
 def getToken(access_key):
     url = "https://www.ura.gov.sg/uraDataService/insertNewToken.action"
-    hdr = { 'AccessKey' : access_key }
+    hdr = { 'AccessKey' : access_key, 'User-Agent': 'Mozilla/5.0'}
 
-    req = urllib.request.Request(url, headers=hdr)
-    response = urllib.request.urlopen(req)
-    token = json.loads(response.read().decode("utf-8"))["Result"]
+    req = requests.get(url, headers=hdr)
+    token = req.json()["Result"]
     
     return token
 
@@ -34,10 +37,9 @@ token = getToken(accessKey)
 def getData(access_key, token, batch):
     
     url = "https://www.ura.gov.sg/uraDataService/invokeUraDS?service=PMI_Resi_Transaction&batch={0}".format(batch)
-    hdr = { 'AccessKey' : accessKey, 'Token' : token}
-    req = urllib.request.Request(url, headers=hdr)
-    response = urllib.request.urlopen(req)
-    json_data = json.loads(response.read().decode("utf-8"))
+    hdr = { 'AccessKey' : accessKey, 'Token' : token, 'User-Agent': 'Mozilla/5.0'}
+    req = requests.get(url, headers=hdr)
+    json_data = req.json()
     main_df = pd.DataFrame(json_data["Result"])
     main_df = main_df.explode("transaction")
     txn_df = main_df["transaction"].apply(lambda x:pd.Series(x))
@@ -138,3 +140,39 @@ def s3write(df):
         )
 
 s3write(df_final)
+
+#%% Write to Snowflake
+
+conn = snowflake.connector.connect(
+                user=cred["snowflake_credentials"]["user"],
+                password=cred["snowflake_credentials"]["password"],
+                account=cred["snowflake_credentials"]["account"],
+                warehouse="URAPROPERTIESDWH",
+                database="URAPROPERTIESDB",
+                schema="PUBLIC"
+                )
+
+### Incremental Load
+
+delete_query = """
+delete from URA_PRIVATE where MONTH >= '{0}'
+""".format(date_cutoff)
+
+conn.cursor().execute(delete_query)
+
+### Load Snowflake
+
+df_snowflake = df_final.rename(
+    columns = {
+        "month":"MONTH", "street": "STREET", "project": "PROJECT", "marketSegment":"MARKET_SEGMENT",
+        "latitude":"LATITUDE", "longitude":"LONGITUDE", "area":"AREA", "floorRange":"FLOOR_RANGE",
+        "noOfUnits":"NO_OF_UNITS", "typeOfSale":"TYPE_OF_SALE", "price":"PRICE",
+        "propertyType":"PROPERTY_TYPE", "district":"DISTRICT", "typeOfArea":"TYPE_OF_AREA",
+        "tenure":"TENURE", "nettPrice":"NETT_PRICE"
+        })
+
+snowflake.connector.pandas_tools.write_pandas(
+    conn = conn,
+    df = df_snowflake,
+    table_name = "URA_PRIVATE",
+    )
