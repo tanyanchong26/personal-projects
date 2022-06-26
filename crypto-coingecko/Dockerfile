@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     libssh2-1-dev \
     default-jdk \
-    libgdal-dev
+    libgdal-dev \
+    git
     
 # Install Basic Shiny Functionality
 RUN R -e "install.packages(c('shiny'))"
@@ -26,16 +27,12 @@ RUN R -e "install.packages(c('shinydashboard', 'shinyWidgets', \
 'plotly', 'httr', 'jsonlite', 'glue', \
 'slider', 'tidymodels', 'DT'))"
 
-# copy the app and file dependencies to the image
+# Git Clone
 
-RUN mkdir /root/crypto-coingecko
-COPY global.R /root/crypto-coingecko
-COPY server.R /root/crypto-coingecko
-COPY ui.R /root/crypto-coingecko
-COPY Rprofile.site /usr/lib/R/etc/
+RUN git clone https://tanyanchong:${GITHUB_TOKEN}@github.com/tanyanchong26/personal-projects.git
 
 EXPOSE 3838
 
-CMD ["R", "-e", "shiny::runApp('/root/crypto-coingecko', port=3838, host = '0.0.0.0')"]
+CMD ["R", "-e", "shiny::runApp('/personal-projects/crypto-coingecko/', port=3838, host = '0.0.0.0')"]
 
 
