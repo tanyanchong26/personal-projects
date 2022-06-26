@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y \
     libxt-dev \
     libssl-dev \
     libssh2-1-dev \
-    default-jdk
+    default-jdk \
+    git
     
 # Install Basic Shiny Functionality
 RUN R -e "install.packages(c('shiny'))"
@@ -23,19 +24,16 @@ RUN R -e "install.packages(c('shiny'))"
 RUN R -e "install.packages(c('shinydashboard', 'shinyWidgets', \
 'shinythemes', 'DT', 'aws.s3'))"
 
+# Git Clone
+
+RUN git clone https://tanyanchong:${GITHUB_TOKEN}@github.com/tanyanchong26/personal-projects.git
+
 # copy the app and file dependencies to the image
 
-RUN mkdir /root/shiny-demo
-COPY global.R /root/shiny-demo
-COPY server.R /root/shiny-demo
-COPY ui.R /root/shiny-demo
-COPY DESCRIPTION /root/shiny-demo
-COPY README.md /root/shiny-demo
 COPY .Renviron /root
-COPY Rprofile.site /usr/lib/R/etc/
 
 EXPOSE 3838
 
-CMD ["R", "-e", "shiny::runApp('/root/shiny-demo', port=3838, host = '0.0.0.0')"]
+CMD ["R", "-e", "shiny::runApp('/personal-projects/data-ingestion-center/', port=3838, host = '0.0.0.0')"]
 
 
