@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     libssh2-1-dev \
     default-jdk \
-    libgdal-dev
+    libgdal-dev \
+    git
     
 # Install Basic Shiny Functionality
 RUN R -e "install.packages(c('shiny'))"
@@ -26,16 +27,10 @@ RUN R -e "install.packages(c('shinydashboard', 'shinyWidgets', \
 'plotly', 'leaflet', 'httr', 'jsonlite', 'glue', \
 'htmltools', 'ggthemes'))"
 
-# copy the app and file dependencies to the image
+# Git Clone
 
-RUN mkdir /root/shiny-demo
-COPY global.R /root/shiny-demo
-COPY server.R /root/shiny-demo
-COPY ui.R /root/shiny-demo
-COPY Rprofile.site /usr/lib/R/etc/
+RUN git clone https://tanyanchong:${GITHUB_TOKEN}@github.com/tanyanchong26/personal-projects.git
 
 EXPOSE 3838
 
-CMD ["R", "-e", "shiny::runApp('/root/shiny-demo', port=3838, host = '0.0.0.0')"]
-
-
+CMD ["R", "-e", "shiny::runApp('/personal-projects/shiny-demo-io/', port=3838, host = '0.0.0.0')"]
