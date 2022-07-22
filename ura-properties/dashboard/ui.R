@@ -70,6 +70,7 @@ ui <- navbarPage("Property Prices in Singapore",
                                   title = "Iteration 1",
                                   solidHeader = TRUE,
                                   collapsible = TRUE,
+                                  collapsed = TRUE,
                                   width = 12
                                 ),
                                 box(
@@ -77,6 +78,7 @@ ui <- navbarPage("Property Prices in Singapore",
                                   title = "Iteration 2",
                                   solidHeader = TRUE,
                                   collapsible = TRUE,
+                                  collapsed = TRUE,
                                   width = 12
                                 ),
                                 box(
@@ -84,6 +86,7 @@ ui <- navbarPage("Property Prices in Singapore",
                                   title = "Iteration 3",
                                   solidHeader = TRUE,
                                   collapsible = TRUE,
+                                  collapsed = TRUE,
                                   width = 12
                                 ),
                                 box(
@@ -91,6 +94,7 @@ ui <- navbarPage("Property Prices in Singapore",
                                   title = "Iteration 4",
                                   solidHeader = TRUE,
                                   collapsible = TRUE,
+                                  collapsed = TRUE,
                                   width = 12
                                 ),
                                 box(
@@ -98,6 +102,7 @@ ui <- navbarPage("Property Prices in Singapore",
                                   title = "Iteration 5",
                                   solidHeader = TRUE,
                                   collapsible = TRUE,
+                                  collapsed = TRUE,
                                   width = 12
                                 )
                               )
