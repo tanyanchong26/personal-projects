@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     pandoc \
     pandoc-citeproc \
     libcurl4-gnutls-dev \
+    build-essential \
     # tidyverse
     libcairo2-dev \
     libxml2-dev \
