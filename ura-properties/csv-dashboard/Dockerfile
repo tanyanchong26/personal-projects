@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     pandoc \
     pandoc-citeproc \
     libcurl4-gnutls-dev \
+    build-essential \
     # tidyverse
     libcairo2-dev \
     libxml2-dev \
@@ -27,6 +28,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install Basic Shiny Functionality
 RUN R -e "install.packages(c('shiny'))"
+RUN R -e "install.packages('https://cran.r-project.org/src/contrib/Archive/terra/terra_1.5-34.tar.gz', repos=NULL, type='source')"
 
 # Install Other Dependencies
 RUN R -e "install.packages(c('tidyverse', 'lubridate', 'jsonlite', 'sf',\
